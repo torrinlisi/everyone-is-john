@@ -1,0 +1,8 @@
+[
+  { "id": "1", "text": "Eat candy", "difficulty": 1 },
+  { "id": "2", "text": "Steal a traffic cone", "difficulty": 1 },
+  { "id": "3", "text": "Convince someone you're royalty", "difficulty": 2 },
+  { "id": "4", "text": "Blow up a building", "difficulty": 3 },
+  { "id": "5", "text": "Befriend a stray animal", "difficulty": 1 },
+  { "id": "6", "text": "Start a cult", "difficulty": 3 }
+]
