@@ -4,10 +4,12 @@ interface PlayerListProps {
   room: Room;
   currentPlayer: Player;
   onCompleteGoal?: (playerId: string) => void;
+  onRerollGoal?: (playerId: string) => void;
   onTransferGM?: (playerId: string) => void;
+  onKick?: (playerId: string) => void;
 }
 
-export default function PlayerList({ room, currentPlayer, onCompleteGoal, onTransferGM }: PlayerListProps) {
+export default function PlayerList({ room, currentPlayer, onCompleteGoal, onRerollGoal, onTransferGM, onKick }: PlayerListProps) {
   const isGM = currentPlayer.role === "gm";
 
   return (
@@ -37,6 +39,14 @@ export default function PlayerList({ room, currentPlayer, onCompleteGoal, onTran
                   Make GM
                 </button>
               )}
+              {onKick && isGM && player.role === "voice" && (
+                <button
+                  style={styles.kickBtn}
+                  onClick={() => window.confirm(`Kick ${player.name}? They will not be able to rejoin.`) && onKick(player.id)}
+                >
+                  Kick
+                </button>
+              )}
               {player.role === "voice" && (
                 <span style={styles.stats}>
                   WP: {player.willpower} | Score: {player.score}
@@ -57,6 +67,14 @@ export default function PlayerList({ room, currentPlayer, onCompleteGoal, onTran
                     onClick={() => onCompleteGoal(player.id)}
                   >
                     Complete
+                  </button>
+                )}
+                {onRerollGoal && (
+                  <button
+                    style={styles.rerollBtn}
+                    onClick={() => onRerollGoal(player.id)}
+                  >
+                    Reroll
                   </button>
                 )}
               </div>
@@ -127,6 +145,24 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#0f3460",
     color: "#eee",
     border: "1px solid #1e5a8e",
+    borderRadius: 4,
+    cursor: "pointer",
+  },
+  kickBtn: {
+    padding: "4px 12px",
+    fontSize: 12,
+    background: "#7f1d1d",
+    color: "#fecaca",
+    border: "1px solid #991b1b",
+    borderRadius: 4,
+    cursor: "pointer",
+  },
+  rerollBtn: {
+    padding: "4px 12px",
+    fontSize: 12,
+    background: "#333",
+    color: "#eee",
+    border: "1px solid #555",
     borderRadius: 4,
     cursor: "pointer",
   },

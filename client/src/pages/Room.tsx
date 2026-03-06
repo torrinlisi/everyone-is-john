@@ -4,11 +4,13 @@ import { useSocket } from "../hooks/useSocket";
 import PlayerList from "../components/PlayerList";
 import GoalWheel from "../components/GoalWheel";
 import GMSettingsPanel from "../components/GMSettingsPanel";
+import SkillCheck from "../components/SkillCheck";
 import SkillPicker from "../components/SkillPicker";
+import GoalPicker from "../components/GoalPicker";
 import { saveSession, getSession, clearSession } from "../utils/sessionStorage";
 import type { Player } from "@shared/types";
 
-type JoinStep = "name" | "skills" | "ready";
+type JoinStep = "name" | "goal" | "skills" | "ready";
 type Mode = "host" | "join" | "rejoin";
 
 export default function Room() {
@@ -24,6 +26,16 @@ export default function Room() {
   const [willpowerCombo, setWillpowerCombo] = useState<2 | 3>(2);
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
   const [bidAmount, setBidAmount] = useState("");
+  const [joinRoomInfo, setJoinRoomInfo] = useState<{
+    settings: import("@shared/types").RoomSettings;
+    players: import("@shared/types").Player[];
+  } | null>(null);
+  const [pendingGoal, setPendingGoal] = useState<{
+    goalId?: string;
+    customText?: string;
+    customDifficulty?: number;
+    random?: boolean;
+  } | null>(null);
 
   const isNewRoom = roomId === "new";
 
@@ -110,20 +122,49 @@ export default function Room() {
       setCurrentPlayer(data.player);
       setRoom(data.room as typeof room);
     });
+    socket.on("kicked", () => {
+      clearSession();
+      window.alert("You have been kicked from the game.");
+      navigate("/");
+    });
     return () => {
       socket.off("room-created");
       socket.off("joined-room");
       socket.off("rejoined");
       socket.off("reselect-skills-done");
+      socket.off("kicked");
     };
   }, [socket, navigate, setRoom]);
 
-  const handleJoinRoom = (e: React.FormEvent) => {
+  const handleJoinRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!socket || !roomId || roomId === "new" || !playerName.trim()) return;
     setError(null);
     if (joinStep === "name") {
-      setJoinStep("skills");
+      const apiUrl = import.meta.env.VITE_API_URL || "";
+      try {
+        const res = await fetch(`${apiUrl}/api/room/${roomId}`);
+        if (!res.ok) {
+          setError("Room doesn't exist");
+          return;
+        }
+        const data = await res.json();
+        if (!(data.settingsConfirmed ?? false)) {
+          setError("Waiting for GM to confirm settings");
+          return;
+        }
+        setJoinRoomInfo({
+          settings: data.settings ?? { rerollGoalOnComplete: true, rerollSkillsOnComplete: false, wpRechargePerRound: 3, wpCapEnabled: true, wpCap: 10, allowCustomGoal: false, allowGoalChoice: false, allowDuplicateGoals: true },
+          players: data.players ?? [],
+        });
+        const needsGoalChoice = (data.settings?.allowGoalChoice ?? false) || (data.settings?.allowCustomGoal ?? false);
+        setJoinStep(needsGoalChoice ? "goal" : "skills");
+      } catch {
+        setError("Room doesn't exist");
+      }
+      return;
+    }
+    if (joinStep === "goal") {
       return;
     }
     if (joinStep === "skills" && selectedSkills.length === willpowerCombo) {
@@ -132,6 +173,7 @@ export default function Room() {
         playerName: playerName.trim(),
         skillIds: selectedSkills,
         willpowerCombo,
+        ...(pendingGoal ?? {}),
       });
     }
   };
@@ -150,9 +192,29 @@ export default function Room() {
     setBidAmount("");
   };
 
-  const handleRerollGoal = () => {
-    if (!socket) return;
-    socket.emit("reroll-goal");
+  const handleSetSkillCheckThreshold = (threshold: number) => {
+    if (!socket || !room || !currentPlayer) return;
+    socket.emit("set-skill-check-threshold", {
+      roomId: room.id,
+      playerId: currentPlayer.id,
+      threshold,
+    });
+  };
+
+  const handleRollSkillCheck = () => {
+    if (!socket || !room || !currentPlayer) return;
+    socket.emit("roll-skill-check", {
+      roomId: room.id,
+      playerId: currentPlayer.id,
+    });
+  };
+
+  const handleClearSkillCheck = () => {
+    if (!socket || !room || !currentPlayer) return;
+    socket.emit("clear-skill-check", {
+      roomId: room.id,
+      playerId: currentPlayer.id,
+    });
   };
 
   const handleTransferGM = (newGmPlayerId: string) => {
@@ -169,9 +231,19 @@ export default function Room() {
     socket.emit("update-settings", settings);
   };
 
+  const handleConfirmSettings = () => {
+    if (!socket) return;
+    socket.emit("confirm-settings");
+  };
+
   const handleGiveControl = () => {
     if (!socket) return;
     socket.emit("give-control");
+  };
+
+  const handleGiveControlToPlayer = (targetPlayerId: string) => {
+    if (!socket) return;
+    socket.emit("give-control-to-player", { targetPlayerId });
   };
 
   const handleStartBidding = () => {
@@ -210,7 +282,7 @@ export default function Room() {
             />
           </label>
           <label>
-            Player count
+            Player count (excluding GM)
             <input
               type="number"
               min={2}
@@ -242,43 +314,68 @@ export default function Room() {
       <div style={styles.container}>
         <h1 style={styles.title}>Join Room</h1>
         {error && <p style={styles.error}>{error}</p>}
-        <form onSubmit={handleJoinRoom} style={styles.form}>
-          {joinStep === "name" && (
-            <>
-              <label>
-                Your name
-                <input
-                  type="text"
-                  value={playerName}
-                  onChange={(e) => setPlayerName(e.target.value)}
-                  placeholder="Player Name"
-                  style={styles.input}
-                  required
+        {joinStep === "goal" && joinRoomInfo ? (
+          <GoalPicker
+            room={{
+              id: roomId,
+              playerCount: 0,
+              players: joinRoomInfo.players,
+              currentController: null,
+              status: "lobby",
+              settings: joinRoomInfo.settings,
+              biddingPhase: false,
+              bids: {},
+              bidOffPlayers: null,
+              bidOffSubmitted: {},
+              skillCheckThreshold: null,
+              skillCheckResult: null,
+              kickedAddresses: [],
+              settingsConfirmed: true,
+            }}
+            onSubmit={(data) => {
+              setPendingGoal(data);
+              setJoinStep("skills");
+            }}
+          />
+        ) : (
+          <form onSubmit={handleJoinRoom} style={styles.form}>
+            {joinStep === "name" && (
+              <>
+                <label>
+                  Your name
+                  <input
+                    type="text"
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    placeholder="Player Name"
+                    style={styles.input}
+                    required
+                  />
+                </label>
+                <button type="submit" style={styles.btn}>
+                  Next
+                </button>
+              </>
+            )}
+            {joinStep === "skills" && (
+              <>
+                <SkillPicker
+                  selected={selectedSkills}
+                  onSelect={setSelectedSkills}
+                  count={willpowerCombo}
+                  onComboChange={setWillpowerCombo}
                 />
-              </label>
-              <button type="submit" style={styles.btn}>
-                Next
-              </button>
-            </>
-          )}
-          {joinStep === "skills" && (
-            <>
-              <SkillPicker
-                selected={selectedSkills}
-                onSelect={setSelectedSkills}
-                count={willpowerCombo}
-                onComboChange={setWillpowerCombo}
-              />
-              <button
-                type="submit"
-                style={styles.btn}
-                disabled={selectedSkills.length !== willpowerCombo}
-              >
-                Join
-              </button>
-            </>
-          )}
-        </form>
+                <button
+                  type="submit"
+                  style={styles.btn}
+                  disabled={selectedSkills.length !== willpowerCombo}
+                >
+                  Join
+                </button>
+              </>
+            )}
+          </form>
+        )}
       </div>
     );
   }
@@ -341,7 +438,7 @@ export default function Room() {
       <header style={styles.header}>
         <h1 style={styles.title}>Room {room.id}</h1>
         <p style={styles.subtitle}>
-          {room.players.length} / {room.playerCount} players • {room.status}
+          {room.players.filter((p) => p.role === "voice").length} / {room.playerCount} players • {room.status}
         </p>
         {!isGM && (
           <p style={currentPlayer.id === room.currentController ? styles.youInControl : styles.you}>
@@ -368,34 +465,83 @@ export default function Room() {
         </p>
       )}
 
+      {!isGM &&
+        currentPlayer.role === "voice" &&
+        !currentPlayer.goal &&
+        ((room.settings.allowGoalChoice ?? false) || (room.settings.allowCustomGoal ?? false)) && (
+          <GoalPicker
+            room={room}
+            onSubmit={(data) => socket?.emit("submit-goal", data)}
+          />
+        )}
+
       {isGM && room.status === "lobby" && (
         <GMSettingsPanel
           settings={room.settings}
+          settingsConfirmed={room.settingsConfirmed ?? false}
           onUpdate={handleUpdateSettings}
+          onConfirmSettings={handleConfirmSettings}
           onStartGame={handleStartGame}
-          canStart={room.players.filter((p) => p.role === "voice").length > 0}
+          canStart={room.players.filter((p) => p.role === "voice").length >= 2}
         />
       )}
 
       {isGM && room.status === "playing" && (room.biddingPhase ?? false) && (
         <div style={styles.section}>
           <h2>Bidding (GM only)</h2>
+          {(room.bidOffPlayers ?? []).length > 0 ? (
+            <p style={styles.bidOffNote}>Bid off: tied players must bid again (≥ their last bid)</p>
+          ) : null}
           <ul style={styles.bidList}>
-            {room.players
-              .filter((p) => p.role === "voice")
-              .map((p) => (
-                <li key={p.id} style={styles.bidItem}>
-                  {p.name}: {p.id in (room.bids || {}) ? `${room.bids[p.id]} WP ✓` : "—"}
-                </li>
-              ))}
+            {(room.bidOffPlayers
+              ? room.players.filter((p) => p.role === "voice" && (room.bidOffPlayers ?? []).includes(p.id))
+              : room.players.filter((p) => p.role === "voice")
+            ).map((p) => (
+              <li key={p.id} style={styles.bidItem}>
+                {p.name}: {p.id in (room.bids || {}) ? `${room.bids[p.id]} WP` : "—"}
+                {(room.bidOffSubmitted ?? {})[p.id] ? " ✓" : ""}
+              </li>
+            ))}
           </ul>
-          {room.players
-            .filter((p) => p.role === "voice")
-            .every((p) => p.id in (room.bids || {})) && (
-            <button style={styles.btn} onClick={handleGiveControl}>
-              Give Control
-            </button>
-          )}
+          {(() => {
+            const voices = room.players.filter((p) => p.role === "voice");
+            const bidders = (room.bidOffPlayers ?? []).length > 0 ? (room.bidOffPlayers ?? []) : voices.map((v) => v.id);
+            const allBidsIn =
+              bidders.length > 0 &&
+              bidders.every((id) => (room.bidOffPlayers ?? []).length > 0 ? (room.bidOffSubmitted ?? {})[id] : id in (room.bids || {}));
+            const isBidOff = (room.bidOffPlayers ?? []).length > 0;
+            return (
+              <div style={styles.bidActions}>
+                {allBidsIn ? (
+                  isBidOff ? (
+                    <button style={styles.btn} onClick={handleGiveControl}>
+                      Bid Off
+                    </button>
+                  ) : (
+                    <button style={styles.btn} onClick={handleGiveControl}>
+                      Give Control
+                    </button>
+                  )
+                ) : (
+                  <button style={styles.btn} disabled>
+                    {isBidOff ? "Bid Off" : "Give Control"}
+                  </button>
+                )}
+                <div style={styles.giveToPlayerRow}>
+                  <span style={styles.giveToLabel}>Give to player (fallback):</span>
+                  {voices.map((p) => (
+                    <button
+                      key={p.id}
+                      style={styles.giveToBtn}
+                      onClick={() => handleGiveControlToPlayer(p.id)}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -415,27 +561,45 @@ export default function Room() {
         room={room}
         currentPlayer={currentPlayer}
         onCompleteGoal={isGM ? (playerId) => socket.emit("complete-goal", { playerId }) : undefined}
+        onRerollGoal={isGM ? (playerId: string) => socket.emit("reroll-goal-for-player", { playerId }) : undefined}
         onTransferGM={isGM ? handleTransferGM : undefined}
+        onKick={isGM ? (playerId: string) => socket.emit("kick-player", { playerId }) : undefined}
+      />
+
+      <SkillCheck
+        room={room}
+        currentPlayer={currentPlayer}
+        onSetThreshold={handleSetSkillCheckThreshold}
+        onRoll={handleRollSkillCheck}
+        onClear={handleClearSkillCheck}
       />
 
       {!isGM && currentPlayer.role === "voice" && currentPlayer.goal && (
         <div style={styles.section}>
           <h2>Your Goal</h2>
-          <GoalWheel goal={currentPlayer.goal} onReroll={handleRerollGoal} canReroll={room.status === "lobby"} />
+          <GoalWheel goal={currentPlayer.goal} onReroll={() => {}} canReroll={false} />
         </div>
       )}
 
       {!isGM && currentPlayer.role === "voice" && room.status === "playing" && (room.biddingPhase ?? false) && (
         <div style={styles.section}>
           <h2>Bid for Control</h2>
-          <p>Willpower: {currentPlayer.willpower}</p>
-          {currentPlayer.id in (room.bids || {}) ? (
+          {(room.bidOffPlayers ?? []).length > 0 && !(room.bidOffPlayers ?? []).includes(currentPlayer.id) ? (
+            <p style={styles.waiting}>Bid off in progress. Waiting for tied players to bid...</p>
+          ) : ((room.bidOffPlayers ?? []).length === 0 && currentPlayer.id in (room.bids || {})) ||
+            ((room.bidOffPlayers ?? []).includes(currentPlayer.id) && (room.bidOffSubmitted ?? {})[currentPlayer.id]) ? (
             <p style={styles.ready}>✓ Ready</p>
           ) : (
             <form onSubmit={handleBid} style={styles.bidForm}>
+              <p>Willpower: {currentPlayer.willpower}</p>
+              {(room.bidOffPlayers ?? []).length > 0 && (
+                <p style={styles.minBid}>
+                  Min bid: {(room.bids || {})[currentPlayer.id] ?? 1} (must be ≥ your last bid)
+                </p>
+              )}
               <input
                 type="number"
-                min={1}
+                min={(room.bidOffPlayers ?? []).includes(currentPlayer.id) ? ((room.bids || {})[currentPlayer.id] ?? 1) : 1}
                 max={currentPlayer.willpower}
                 value={bidAmount}
                 onChange={(e) => setBidAmount(e.target.value)}
@@ -443,7 +607,7 @@ export default function Room() {
                 style={styles.input}
               />
               <button type="submit" style={styles.btn}>
-                Bid
+                {(room.bidOffSubmitted ?? {})[currentPlayer.id] ? "Update bid" : "Bid"}
               </button>
             </form>
           )}
@@ -570,6 +734,45 @@ const styles: Record<string, React.CSSProperties> = {
   ready: {
     color: "#4ade80",
     margin: 0,
+  },
+  bidOffNote: {
+    margin: "0 0 12px 0",
+    color: "#fbbf24",
+    fontSize: 14,
+  },
+  bidActions: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+  },
+  giveToPlayerRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 8,
+  },
+  giveToLabel: {
+    color: "#aaa",
+    fontSize: 14,
+  },
+  giveToBtn: {
+    padding: "4px 12px",
+    fontSize: 12,
+    background: "#333",
+    color: "#eee",
+    border: "1px solid #555",
+    borderRadius: 4,
+    cursor: "pointer",
+  },
+  minBid: {
+    margin: "0 0 8px 0",
+    color: "#aaa",
+    fontSize: 14,
+  },
+  waiting: {
+    margin: 0,
+    color: "#888",
+    fontStyle: "italic",
   },
   secondaryBtn: {
     marginTop: 16,

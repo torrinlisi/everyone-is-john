@@ -2,14 +2,18 @@ import type { RoomSettings } from "@shared/types";
 
 interface GMSettingsPanelProps {
   settings: RoomSettings;
+  settingsConfirmed: boolean;
   onUpdate: (settings: Partial<RoomSettings>) => void;
+  onConfirmSettings: () => void;
   onStartGame: () => void;
   canStart: boolean;
 }
 
 export default function GMSettingsPanel({
   settings,
+  settingsConfirmed,
   onUpdate,
+  onConfirmSettings,
   onStartGame,
   canStart,
 }: GMSettingsPanelProps) {
@@ -31,6 +35,30 @@ export default function GMSettingsPanel({
           onChange={(e) => onUpdate({ rerollSkillsOnComplete: e.target.checked })}
         />
         Reroll skills on goal complete
+      </label>
+      <label style={styles.checkbox}>
+        <input
+          type="checkbox"
+          checked={settings.allowCustomGoal ?? false}
+          onChange={(e) => onUpdate({ allowCustomGoal: e.target.checked })}
+        />
+        Allow custom goal
+      </label>
+      <label style={styles.checkbox}>
+        <input
+          type="checkbox"
+          checked={settings.allowGoalChoice ?? false}
+          onChange={(e) => onUpdate({ allowGoalChoice: e.target.checked })}
+        />
+        Allow goal choice
+      </label>
+      <label style={styles.checkbox}>
+        <input
+          type="checkbox"
+          checked={settings.allowDuplicateGoals ?? true}
+          onChange={(e) => onUpdate({ allowDuplicateGoals: e.target.checked })}
+        />
+        Allow duplicate goals
       </label>
       <label style={styles.row}>
         <span>WP recharge per bidding round:</span>
@@ -61,6 +89,14 @@ export default function GMSettingsPanel({
             style={styles.numInput}
           />
         </label>
+      )}
+      {!settingsConfirmed && (
+        <button style={styles.confirmBtn} onClick={onConfirmSettings}>
+          Confirm settings (open for joining)
+        </button>
+      )}
+      {settingsConfirmed && (
+        <p style={styles.confirmedNote}>Settings confirmed – players can join</p>
       )}
       <button
         style={{ ...styles.startBtn, opacity: canStart ? 1 : 0.5 }}
@@ -100,6 +136,21 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #444",
     borderRadius: 4,
     color: "#eee",
+  },
+  confirmBtn: {
+    marginTop: 16,
+    padding: "12px 24px",
+    background: "#0f3460",
+    color: "#eee",
+    border: "1px solid #1e5a8e",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontWeight: 600,
+  },
+  confirmedNote: {
+    marginTop: 12,
+    color: "#4ade80",
+    fontSize: 14,
   },
   startBtn: {
     marginTop: 16,

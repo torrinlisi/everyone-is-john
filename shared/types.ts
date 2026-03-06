@@ -15,6 +15,9 @@ export interface RoomSettings {
   wpRechargePerRound: number;
   wpCapEnabled: boolean;
   wpCap: number;
+  allowCustomGoal: boolean;
+  allowGoalChoice: boolean;
+  allowDuplicateGoals: boolean;
 }
 
 export type PlayerRole = "gm" | "voice";
@@ -29,6 +32,11 @@ export interface Player {
   score: number;
 }
 
+export interface SkillCheckResult {
+  playerId: string;
+  value: number;
+}
+
 export interface Room {
   id: string;
   playerCount: number;
@@ -36,8 +44,14 @@ export interface Room {
   currentController: string | null;
   status: "lobby" | "playing";
   settings: RoomSettings;
+  settingsConfirmed: boolean;
   biddingPhase: boolean;
   bids: Record<string, number>;
+  bidOffPlayers: string[] | null;
+  bidOffSubmitted: Record<string, boolean>;
+  skillCheckThreshold: number | null;
+  skillCheckResult: SkillCheckResult | null;
+  kickedAddresses: string[];
 }
 
 export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
@@ -46,6 +60,9 @@ export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   wpRechargePerRound: 3,
   wpCapEnabled: true,
   wpCap: 10,
+  allowCustomGoal: false,
+  allowGoalChoice: false,
+  allowDuplicateGoals: true,
 };
 
 export const WILLPOWER_COMBOS = {
